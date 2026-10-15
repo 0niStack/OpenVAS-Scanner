@@ -1,0 +1,193 @@
+# Greenbone Community Edition (OpenVAS) - based on the official community containers
+name: openvas
+
+x-feed: &feed
+  restart: "no"
+
+services:
+  vulnerability-tests:
+    image: registry.community.greenbone.net/community/vulnerability-tests
+    environment:
+      STORAGE_PATH: /var/lib/openvas/22.04/vt-data/nasl
+    volumes:
+      - vt_data_vol:/mnt
+
+  notus-data:
+    image: registry.community.greenbone.net/community/notus-data
+    volumes:
+      - notus_data_vol:/mnt
+
+  scap-data:
+    image: registry.community.greenbone.net/community/scap-data
+    volumes:
+      - scap_data_vol:/mnt
+
+  cert-bund-data:
+    image: registry.community.greenbone.net/community/cert-bund-data
+    volumes:
+      - cert_data_vol:/mnt
+
+  dfn-cert-data:
+    image: registry.community.greenbone.net/community/dfn-cert-data
+    volumes:
+      - cert_data_vol:/mnt
+    depends_on:
+      - cert-bund-data
+
+  data-objects:
+    image: registry.community.greenbone.net/community/data-objects
+    volumes:
+      - data_objects_vol:/mnt
+
+  report-formats:
+    image: registry.community.greenbone.net/community/report-formats
+    volumes:
+      - data_objects_vol:/mnt
+    depends_on:
+      - data-objects
+
+  gpg-data:
+    image: registry.community.greenbone.net/community/gpg-data
+    volumes:
+      - gpg_data_vol:/mnt
+
+  redis-server:
+    image: registry.community.greenbone.net/community/redis-server
+    restart: on-failure
+    volumes:
+      - redis_socket_vol:/run/redis/
+
+  pg-gvm:
+    image: registry.community.greenbone.net/community/pg-gvm:stable
+    restart: on-failure
+    volumes:
+      - psql_data_vol:/var/lib/postgresql
+      - psql_socket_vol:/var/run/postgresql
+
+  gvmd:
+    image: registry.community.greenbone.net/community/gvmd:stable
+    restart: on-failure
+    volumes:
+      - gvmd_data_vol:/var/lib/gvm
+      - scap_data_vol:/var/lib/gvm/scap-data/
+      - cert_data_vol:/var/lib/gvm/cert-data
+      - data_objects_vol:/var/lib/gvm/data-objects/gvmd
+      - vt_data_vol:/var/lib/openvas/plugins
+      - psql_data_vol:/var/lib/postgresql
+      - gvmd_socket_vol:/run/gvmd
+      - ospd_openvas_socket_vol:/run/ospd
+      - psql_socket_vol:/var/run/postgresql
+    depends_on:
+      pg-gvm:
+        condition: service_started
+      scap-data:
+        condition: service_completed_successfully
+      cert-bund-data:
+        condition: service_completed_successfully
+      dfn-cert-data:
+        condition: service_completed_successfully
+      data-objects:
+        condition: service_completed_successfully
+      report-formats:
+        condition: service_completed_successfully
+
+  gsa:
+    image: registry.community.greenbone.net/community/gsad:stable
+    restart: on-failure
+    ports:
+      # Bound to localhost only. Use an SSH tunnel or reverse proxy for remote access.
+      - "${GSA_BIND:-127.0.0.1}:${GSA_PORT:-9392}:80"
+    volumes:
+      - gvmd_socket_vol:/run/gvmd
+    depends_on:
+      - gvmd
+
+  ospd-openvas:
+    image: registry.community.greenbone.net/community/ospd-openvas:stable
+    restart: on-failure
+    hostname: ospd-openvas.local
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    command:
+      [
+        "ospd-openvas",
+        "-f",
+        "--config",
+        "/etc/gvm/ospd-openvas.conf",
+        "--mqtt-broker-address",
+        "mqtt-broker",
+        "--notus-feed-dir",
+        "/var/lib/notus/advisories",
+        "-m",
+        "666"
+      ]
+    volumes:
+      - gpg_data_vol:/etc/openvas/gnupg
+      - vt_data_vol:/var/lib/openvas/plugins
+      - notus_data_vol:/var/lib/notus
+      - ospd_openvas_socket_vol:/run/ospd
+      - redis_socket_vol:/run/redis/
+      - openvas_data_vol:/etc/openvas/
+    depends_on:
+      redis-server:
+        condition: service_started
+      gpg-data:
+        condition: service_completed_successfully
+      vulnerability-tests:
+        condition: service_completed_successfully
+
+  mqtt-broker:
+    image: registry.community.greenbone.net/community/mqtt-broker
+    restart: on-failure
+    networks:
+      default:
+        aliases:
+          - mqtt-broker
+          - broker
+
+  notus-scanner:
+    image: registry.community.greenbone.net/community/notus-scanner:stable
+    restart: on-failure
+    volumes:
+      - notus_data_vol:/var/lib/notus
+      - gpg_data_vol:/etc/openvas/gnupg
+    environment:
+      NOTUS_SCANNER_MQTT_BROKER_ADDRESS: mqtt-broker
+      NOTUS_SCANNER_PRODUCTS_DIRECTORY: /var/lib/notus/products
+    depends_on:
+      mqtt-broker:
+        condition: service_started
+      gpg-data:
+        condition: service_completed_successfully
+      vulnerability-tests:
+        condition: service_completed_successfully
+
+  gvm-tools:
+    image: registry.community.greenbone.net/community/gvm-tools
+    volumes:
+      - gvmd_socket_vol:/run/gvmd
+      - ospd_openvas_socket_vol:/run/ospd
+      - ./reports:/reports
+    depends_on:
+      - gvmd
+      - ospd-openvas
+    profiles: ["tools"]
+
+volumes:
+  gpg_data_vol:
+  scap_data_vol:
+  cert_data_vol:
+  data_objects_vol:
+  gvmd_data_vol:
+  psql_data_vol:
+  vt_data_vol:
+  notus_data_vol:
+  psql_socket_vol:
+  gvmd_socket_vol:
+  ospd_openvas_socket_vol:
+  redis_socket_vol:
+  openvas_data_vol:

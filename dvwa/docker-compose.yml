@@ -1,0 +1,38 @@
+# DVWA (Damn Vulnerable Web Application) - intentionally vulnerable. LAB USE ONLY.
+name: dvwa-lab
+
+services:
+  dvwa:
+    image: ghcr.io/digininja/dvwa:latest
+    restart: unless-stopped
+    environment:
+      DB_SERVER: db
+    depends_on:
+      - db
+    ports:
+      - "127.0.0.1:4280:80"      # browse from the host only
+    networks:
+      vulnlab:
+        ipv4_address: 172.30.0.10   # fixed IP so OpenVAS has a stable target
+      default: {}
+
+  db:
+    image: docker.io/library/mariadb:10
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: dvwa
+      MYSQL_DATABASE: dvwa
+      MYSQL_USER: dvwa
+      MYSQL_PASSWORD: p@ssw0rd
+    volumes:
+      - dvwa_db:/var/lib/mysql
+
+networks:
+  vulnlab:
+    name: vulnlab
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  dvwa_db:

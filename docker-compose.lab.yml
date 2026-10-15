@@ -1,0 +1,11 @@
+# Override: attach the OpenVAS scanner to the DVWA lab network so it can reach 172.30.0.10
+services:
+  ospd-openvas:
+    networks:
+      - default
+      - vulnlab
+
+networks:
+  vulnlab:
+    external: true
+    name: vulnlab
